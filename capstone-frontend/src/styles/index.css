@@ -1,14 +1,8 @@
-* {
-    margin: 0;
-    padding: 0;
-}
-.app {
-    background-color: #ede0d4;
-    height: 100vh;
-    display: flex;
-    flex-direction: column;
-}
-.main-content {
-    flex-grow: 1;
-    padding: 5px;
+@import "tailwindcss";
+
+/* Tell Tailwind to include these utilities */
+@reference ".bg-gray-50 .text-gray-800";
+
+body {
+  @apply bg-gray-50 text-gray-800;
 }

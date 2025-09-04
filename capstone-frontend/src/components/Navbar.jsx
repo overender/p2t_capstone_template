@@ -1,24 +1,46 @@
-import React from 'react'
-import { NavLink } from 'react-router';
+import { NavLink } from 'react-router-dom';
+import React from 'react';
 import { useCartStore } from '../store/CartStore';
-import '../styles/navbar.css';
 
-const Navbar = () => {
-  const { items } = useCartStore();
-  const totalPrice = items?.reduce((total, item) => total + item.price, 0);
+export default function Navbar() {
+  const { items, total } = useCartStore();
+  const count = items?.reduce((n, it) => n + (it.qty || 1), 0);
+
   return (
-    <nav className='navbar'>
-      <h1>Header Goes Here</h1>
-      <section className='nav-links-container'>
-        <NavLink to="/" className='nav-link'>Home</NavLink>
-        {/* You will have to adjust the NavLink element below this comment to create a real checkout page, starting with creating a new route in your project and then adjusting the `to` property */}
-        <NavLink to="#" className='nav-link'>Checkout ${totalPrice}</NavLink>
-        {/* Create New NavLink Elements in your project and place them below this comment */}
+    <nav className="sticky top-0 z-50 bg-white/90 backdrop-blur shadow-sm">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between">
+        <NavLink to="/" className="text-xl font-bold text-indigo-600">
+          My Shop
+        </NavLink>
 
-        {/* Create New NavLink Elements in your project and place them above this comment */}
-      </section>
+        <div className="flex items-center gap-6">
+          <NavLink
+            to="/"
+            className={({ isActive }) =>
+              `hover:text-indigo-600 transition ${
+                isActive ? 'text-indigo-600 font-semibold' : 'text-gray-700'
+              }`
+            }
+          >
+            Home
+          </NavLink>
+
+          <NavLink
+            to="/cart"
+            className={({ isActive }) =>
+              `relative hover:text-indigo-600 transition ${
+                isActive ? 'text-indigo-600 font-semibold' : 'text-gray-700'
+              }`
+            }
+          >
+            Cart
+            <span className="ml-2 inline-flex items-center gap-1 text-sm">
+              <span className="rounded-full bg-gray-200 px-2 py-0.5">{count}</span>
+              <span className="text-gray-500">${total().toFixed(2)}</span>
+            </span>
+          </NavLink>
+        </div>
+      </div>
     </nav>
-  )
+  );
 }
-
-export default Navbar

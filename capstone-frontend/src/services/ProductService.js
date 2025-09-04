@@ -1,14 +1,32 @@
-import axios from 'axios';
+import api from './api';
 
-const baseUrl = 'http://localhost:3500/';
+ export const fetchProducts = async (category) => {
+   const res = await api.get('/products', { params: { category } });
+   return res.data;
+ };
 
-export async function getProducts() {
-    const { data } = await axios.get(`${baseUrl}products`);
-    return data;
-}
+ export const createProduct = async (payload) => {
+   const res = await api.post('/products', payload);
+   return res.data;
+ };
 
-// This function retrieves a product by its ID and has been created for you, but you will need to import it in your components as needed.
-export async function getProductById(id) {
-    const { data } = await axios.get(`${baseUrl}products/${id}`);
-    return data;
-}
+ export const deleteProduct = async (id) => {
+   const res = await api.delete(`/products/${id}`);
+   return res.data;
+ };
+
+export const uploadImage = async (file) => {
+  const form = new FormData();
+  form.append('image', file);
+  try {
+    const res = await api.post('/upload', form); // let axios set multipart headers
+    return res.data; // { url, public_id }
+  } catch (err) {
+    const details = err?.response?.data?.details || err?.response?.data?.message || err.message;
+    throw new Error(details);
+  }
+};
+
+
+// alias so pages/Home.jsx keeps working
+export const getProducts = fetchProducts
