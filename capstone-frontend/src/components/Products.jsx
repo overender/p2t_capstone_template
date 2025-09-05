@@ -1,95 +1,130 @@
-import { useEffect, useMemo, useState } from 'react';
-import { fetchProducts } from '../services/ProductService';
-import { useCartStore } from '../store/CartStore';
+import { useEffect, useState } from "react";
+import api from "../api";
+import { useCart } from "../store/cart";
 
-export default function Products({ products: productsProp }) {
-  const [items, setItems] = useState(productsProp ?? []);
-  const [category, setCategory] = useState('');
+export default function Products() {
+  const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState('');
-  const { addItem } = useCartStore();
+  const [err, setErr] = useState("");
+  const [category, setCategory] = useState("");
+  const add = useCart((s) => s.add);
 
-  useEffect(() => {
-    if (productsProp) { setLoading(false); return; }
-    const load = async () => {
-      try {
-        setLoading(true);
-        const data = await fetchProducts(category || undefined);
-        setItems(data);
-        setErr('');
-      } catch (e) {
-        setErr('Failed to load products');
-      } finally {
-        setLoading(false);
-      }
-    };
-    load();
-  }, [category, productsProp]);
+  async function loadProducts(cat = "") {
+    setLoading(true); setErr("");
+    try {
+      const url = cat ? `/products?category=${encodeURIComponent(cat)}` : "/products";
+      const { data } = await api.get(url);
+      setItems(Array.isArray(data) ? data : []);
+    } catch (e) {
+      setErr(e?.response?.data?.message || "Failed to load products");
+    } finally {
+      setLoading(false);
+    }
+  }
 
-  const displayItems = useMemo(() => items ?? [], [items]);
+  useEffect(() => { loadProducts(category); }, [category]);
+
+  function handleAdd(p) {
+    add({
+      _id: p._id,
+      name: p.name,
+      price: Number(p.price) || 0,
+      imageUrl: p.imageUrl || "",
+      qty: 1,
+    });
+  }
 
   return (
-    <div className="space-y-6">
-      {/* Filter bar */}
-      <div className="flex flex-wrap items-center gap-3">
-        <label className="text-sm text-gray-600">Category</label>
-        <select
-          className="border rounded px-3 py-2 bg-white"
-          value={category}
-          onChange={(e) => setCategory(e.target.value)}
-        >
-          <option value="">All Categories</option>
-          <option value="Clothing">Clothing</option>
-          <option value="Footwear">Footwear</option>
-          <option value="Accessories">Accessories</option>
-        </select>
-      </div>
-
-      {/* States */}
-      {loading && <div className="text-gray-500">Loading products…</div>}
-      {err && !loading && <div className="text-red-600">{err}</div>}
-      {!loading && !displayItems.length && <div>No products yet.</div>}
-
-      {/* Grid */}
-      {!loading && !!displayItems.length && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
-          {displayItems.map((p) => (
-            <div key={p._id} className="bg-white rounded-xl shadow-sm border p-4 flex flex-col">
-              {p.imageUrl ? (
-                <img
-                  src={p.imageUrl}
-                  alt={p.name}
-                  className="w-full h-44 object-cover rounded-lg mb-3"
-                />
-              ) : (
-                <div className="w-full h-44 bg-gray-100 rounded-lg mb-3" />
-              )}
-
-              <div className="flex-1">
-                <div className="font-semibold">{p.name}</div>
-                <div className="text-gray-600">${Number(p.price).toFixed(2)}</div>
-                {p.description && (
-                  <p className="text-sm text-gray-500 mt-2 line-clamp-2">{p.description}</p>
-                )}
-              </div>
-
-              <button
-                className="mt-4 w-full inline-flex items-center justify-center gap-2 border rounded-lg px-3 py-2 hover:bg-gray-50 active:bg-gray-100 transition"
-                onClick={() =>
-                  addItem({
-                    _id: p._id,
-                    name: p.name,
-                    price: Number(p.price),
-                    imageUrl: p.imageUrl,
-                  })
-                }
-              >
-                Add to Cart
-              </button>
-            </div>
-          ))}
+    <div className="container">
+      <div className="mx-auto my-8 max-w-6xl">
+        <div className="mb-4 flex flex-wrap items-center gap-3">
+          <h1 className="text-2xl font-semibold">Store</h1>
+          <div className="ml-auto flex items-center gap-2">
+            <label className="text-sm text-gray-700">Category</label>
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              className="rounded border border-gray-300 px-2 py-1 text-sm"
+            >
+              <option value="">All</option>
+              <option value="Electronics">Electronics</option>
+              <option value="Clothing">Clothing</option>
+              <option value="Books">Books</option>
+              {/* add your own categories */}
+            </select>
+          </div>
         </div>
-      )}
+
+        {err && (
+          <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-red-700">
+            {err}
+          </div>
+        )}
+
+        {loading ? (
+          <SkeletonGrid />
+        ) : items.length === 0 ? (
+          <div className="rounded-md border border-gray-200 bg-white p-6 text-gray-600">
+            No products yet.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+            {items.map((p) => (
+              <article
+                key={p._id}
+                className="flex flex-col rounded-xl border border-gray-200 bg-white shadow-sm"
+              >
+                {p.imageUrl ? (
+                  <img
+                    src={p.imageUrl}
+                    alt={p.name}
+                    className="h-48 w-full rounded-t-xl object-cover"
+                    loading="lazy"
+                  />
+                ) : (
+                  <div className="h-48 w-full rounded-t-xl bg-gray-100" />
+                )}
+
+                <div className="flex flex-1 flex-col gap-2 p-4">
+                  <h3 className="line-clamp-2 text-base font-semibold">{p.name}</h3>
+                  {p.description && (
+                    <p className="line-clamp-2 text-sm text-gray-600">{p.description}</p>
+                  )}
+                  <div className="mt-auto flex items-center justify-between">
+                    <span className="text-lg font-bold">
+                      ${Number(p.price || 0).toFixed(2)}
+                    </span>
+                    <button
+                      onClick={() => handleAdd(p)}
+                      className="inline-flex items-center justify-center rounded-md bg-gray-800 px-3 py-2 text-sm font-medium text-white transition hover:bg-gray-900"
+                    >
+                      Add to Cart
+                    </button>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SkeletonGrid() {
+  const arr = Array.from({ length: 8 });
+  return (
+    <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+      {arr.map((_, i) => (
+        <div key={i} className="animate-pulse rounded-xl border border-gray-200 bg-white shadow-sm">
+          <div className="h-48 w-full rounded-t-xl bg-gray-200" />
+          <div className="space-y-3 p-4">
+            <div className="h-4 w-3/4 rounded bg-gray-200" />
+            <div className="h-3 w-2/3 rounded bg-gray-200" />
+            <div className="h-8 w-24 rounded bg-gray-200" />
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

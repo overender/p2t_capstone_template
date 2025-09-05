@@ -1,31 +1,28 @@
-// capstone-backend/index.js
 require('dotenv').config();
-
-const path = require('path');
 const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
-const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const streamifier = require('streamifier');
 const Stripe = require('stripe');
-
-// ---- Models & Utilities (ensure these files exist) ----
+const jwt = require("jsonwebtoken");
+const { auth, isAdmin } = require("./middleware/auth");
+// ---- Models & Middleware & Utils ----
 const Order = require('./models/Order');
 const Product = require('./models/Product');
 const User = require('./models/User');
-const { auth, isAdmin } = require('./middleware/auth');
 const cloudinary = require('./utils/cloudinary');
+const authRoutes = require('./routes/auth');
 
-// ---- App & Core Middleware ----
+// ---- App ----
 const app = express();
 
-// CORS: allow your Vite dev origins; do NOT pass a URL to app.use()
+// ---- Core Middleware (before routes) ----
 const allowedOrigins = ['http://localhost:5173', 'http://127.0.0.1:5173'];
 app.use(
   cors({
     origin(origin, cb) {
-      // allow no-origin (curl, Postman) and known dev origins
+      // allow no-origin (curl/Postman) and dev origins
       if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
       return cb(new Error('Not allowed by CORS'));
     },
@@ -35,14 +32,9 @@ app.use(
   })
 );
 
-// IMPORTANT: Do not add app.options('*', ...) on Express 5; it trips path-to-regexp.
-// If you really want to short-circuit OPTIONS, do it generically:
-// app.use((req, res, next) => { if (req.method === 'OPTIONS') return res.sendStatus(204); next(); });
-
 app.use(express.json());
 
-// (DEV) CSP permissive enough for Stripe Payment Element.
-// For production, consider helmet with a tighter policy.
+// (Optional) CSP - fine for dev; if extensions complain, you can disable this in dev
 app.use((req, res, next) => {
   res.setHeader(
     'Content-Security-Policy',
@@ -62,80 +54,20 @@ app.use((req, res, next) => {
   next();
 });
 
-// ---- Database ----
-const DB_URL = process.env.DB_URL;
-const DB_NAME = process.env.DB_NAME || 'capstone';
-if (!DB_URL) {
-  console.error('❌ Missing DB_URL in .env');
-  process.exit(1);
-}
-mongoose
-  .connect(DB_URL, { dbName: DB_NAME })
-  .then(() => console.log('✅ Mongo connected'))
-  .catch((err) => {
-    console.error('❌ Mongo connection error:', err);
-    process.exit(1);
-  });
-
-// ---- Auth helpers ----
-function signToken(user) {
-  return jwt.sign(
-    { id: user._id, email: user.email, name: user.name, role: user.role },
-    process.env.JWT_SECRET || 'changeme',
-    { expiresIn: '7d' }
-  );
-}
-
-// ---- Routes ----
-
-// Health
+// ---- Health ----
 app.get('/health', (req, res) => res.json({ ok: true }));
 
-// Register
-app.post('/auth/register', async (req, res) => {
-  try {
-    const { name = '', email, password, role = 'user' } = req.body || {};
-    if (!email || !password) {
-      return res.status(400).json({ message: 'Email and password required' });
-    }
-    const exists = await User.findOne({ email });
-    if (exists) return res.status(400).json({ message: 'Email already in use' });
+// ---- Auth Routes (login/register) ----
+// Keep these centralized in routes/auth.js (uses bcrypt + returns {token,user})
+app.use('/auth', authRoutes);
 
-    // NOTE: For MVP we store plain text; replace with bcrypt in production.
-    const user = await User.create({ name, email, password, role });
-    const token = signToken(user);
-    res.status(201).json({
-      token,
-      user: { id: user._id, email: user.email, name: user.name, role: user.role },
-    });
-  } catch (e) {
-    console.error('Register error:', e);
-    res.status(500).json({ message: 'Register failed' });
-  }
+// ---- Minimal protected endpoint to verify JWT ----
+app.get('/me', auth, (req, res) => {
+  // req.user comes from your JWT payload in middleware
+  res.json({ user: req.user });
 });
 
-// Login
-app.post('/auth/login', async (req, res) => {
-  try {
-    const { email, password } = req.body || {};
-    if (!email || !password) return res.status(400).json({ message: 'Missing creds' });
-
-    const user = await User.findOne({ email }).select('+password');
-    if (!user || user.password !== password) {
-      return res.status(401).json({ message: 'Invalid credentials' });
-    }
-    const token = signToken(user);
-    res.json({
-      token,
-      user: { id: user._id, email: user.email, name: user.name, role: user.role },
-    });
-  } catch (e) {
-    console.error('Login error:', e);
-    res.status(500).json({ message: 'Login failed' });
-  }
-});
-
-// Products
+// ---- Products ----
 app.get('/products', async (req, res) => {
   try {
     const { category } = req.query;
@@ -185,8 +117,9 @@ app.delete('/products/:id', auth, isAdmin, async (req, res) => {
   }
 });
 
-// Cloudinary upload (admin) — multer memory + upload_stream
+// ---- Cloudinary upload (admin) — multer memory + upload_stream ----
 const upload = multer({ storage: multer.memoryStorage() });
+
 app.post('/upload', auth, isAdmin, upload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: 'No file provided' });
@@ -208,7 +141,7 @@ app.post('/upload', auth, isAdmin, upload.single('file'), async (req, res) => {
   }
 });
 
-// Stripe PaymentIntent
+// ---- Stripe PaymentIntent ----
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', { apiVersion: '2024-06-20' });
 
 app.post('/create-payment-intent', auth, async (req, res) => {
@@ -243,7 +176,7 @@ app.post('/create-payment-intent', auth, async (req, res) => {
   }
 });
 
-// Orders
+// ---- Orders ----
 app.post('/orders', auth, async (req, res) => {
   try {
     const { items, paymentId } = req.body;
@@ -288,6 +221,68 @@ app.post('/orders', auth, async (req, res) => {
   }
 });
 
-// ---- Start ----
+// === MVP: Admin orders list ===
+app.get('/orders', auth, isAdmin, async (req, res) => {
+  try {
+    const orders = await Order.find().sort({ createdAt: -1 });
+    res.json(orders);
+  } catch (e) {
+    res.status(500).json({ message: 'Failed to fetch orders' });
+  }
+});
+
+// === MVP: My orders ===
+app.get('/my/orders', auth, async (req, res) => {
+  try {
+    const orders = await Order.find({ 'user.id': req.user.id }).sort({ createdAt: -1 });
+    res.json(orders);
+  } catch (e) {
+    res.status(500).json({ message: 'Failed to fetch your orders' });
+  }
+});
+
+
+// TEMP: make current user admin and return a fresh token
+app.post("/auth/dev-elevate", auth, async (req, res) => {
+  try {
+    const user = await User.findByIdAndUpdate(
+      req.user.id,
+      { $set: { role: "admin" } },
+      { new: true }
+    );
+    if (!user) return res.status(404).json({ message: "User not found" });
+    if (!process.env.JWT_SECRET) return res.status(500).json({ message: "Missing JWT_SECRET" });
+
+    const token = jwt.sign(
+      { id: user._id, name: user.name, email: user.email, role: user.role },
+      process.env.JWT_SECRET,
+      { expiresIn: process.env.JWT_EXPIRES_IN || "7d" }
+    );
+    res.json({ token, user: { id: user._id, name: user.name, email: user.email, role: user.role } });
+  } catch (e) {
+    res.status(500).json({ message: "Elevate failed" });
+  }
+});
+
+// ---- Database & Start ----
 const PORT = process.env.PORT || 3500;
-app.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT}`));
+const DB_URL = process.env.DB_URL;
+const DB_NAME = process.env.DB_NAME || 'capstone';
+
+if (!DB_URL) {
+  console.error('❌ Missing DB_URL in .env');
+  process.exit(1);
+}
+
+async function start() {
+  try {
+    await mongoose.connect(DB_URL, { dbName: DB_NAME });
+    console.log(`✅ Mongo connected → ${DB_URL}/${DB_NAME}`);
+    app.listen(PORT, () => console.log(`🚀 Server running → http://localhost:${PORT}`));
+  } catch (err) {
+    console.error('❌ Server start error:', err.message);
+    process.exit(1);
+  }
+}
+
+start();

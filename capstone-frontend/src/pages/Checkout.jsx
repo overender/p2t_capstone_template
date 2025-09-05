@@ -1,138 +1,126 @@
-import { useEffect, useState, useMemo } from 'react';
-import { useCartStore } from '../store/CartStore';
-import { loadStripe } from '@stripe/stripe-js';
-import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
-import api from '../services/api';
-import { Link, useNavigate } from 'react-router-dom';
+import { useEffect, useState } from "react";
+import { useCart } from "../store/cart";
+import api from "../api";
+import { useNavigate } from "react-router-dom";
+import { loadStripe } from "@stripe/stripe-js";
+import { Elements, useStripe, useElements, PaymentElement } from "@stripe/react-stripe-js";
 
-const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
-
-function CheckoutForm({ clientSecret }) {
-  const { items, total, clear } = useCartStore();
-  const stripe = useStripe();
-  const elements = useElements();
-  const navigate = useNavigate();
-  const [status, setStatus] = useState('');
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!stripe || !elements) return;
-    setStatus('Processing...');
-
-    const { error, paymentIntent } = await stripe.confirmPayment({
-      elements,
-      redirect: 'if_required',
-    });
-
-    if (error) {
-      setStatus(error.message || 'Payment failed.');
-      return;
-    }
-
-    try {
-      await api.post('/orders', {
-        items,
-        paymentId: paymentIntent?.id || 'test_payment',
-      });
-      clear();
-      navigate('/');
-    } catch {
-      setStatus('Payment succeeded, but saving the order failed.');
-    }
-  };
-
-  return (
-    <div className="max-w-3xl mx-auto p-6 space-y-6">
-      <h1 className="text-2xl font-bold">Checkout</h1>
-
-      {/* Summary */}
-      <div className="bg-white border rounded-xl p-4">
-        <h2 className="font-semibold mb-3">Order Summary</h2>
-        <ul className="divide-y">
-          {items.map(it => (
-            <li key={it._id} className="py-2 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                {it.imageUrl
-                  ? <img src={it.imageUrl} alt={it.name} className="w-12 h-12 object-cover rounded" />
-                  : <div className="w-12 h-12 bg-gray-100 rounded" />
-                }
-                <div>
-                  <div className="font-medium">{it.name}</div>
-                  <div className="text-sm text-gray-500">Qty: {it.qty || 1}</div>
-                </div>
-              </div>
-              <div className="font-medium">${(Number(it.price) * (it.qty || 1)).toFixed(2)}</div>
-            </li>
-          ))}
-        </ul>
-        <div className="mt-4 flex items-center justify-between">
-          <span className="text-gray-600">Total</span>
-          <span className="text-xl font-semibold">${total().toFixed(2)}</span>
-        </div>
-      </div>
-
-      {/* Payment form */}
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <PaymentElement />
-        <div className="flex justify-end gap-3">
-          <Link to="/cart" className="border px-4 py-2 rounded">Back to Cart</Link>
-          <button className="bg-black text-white px-4 py-2 rounded" disabled={!stripe}>
-            Pay
-          </button>
-        </div>
-        {status && <div className="text-sm text-gray-600">{status}</div>}
-      </form>
-    </div>
-  );
-}
+const pk = import.meta.env.VITE_STRIPE_PK;
+const stripePromise = pk ? loadStripe(pk) : null;
 
 export default function Checkout() {
-  const { items } = useCartStore();
-  const [clientSecret, setClientSecret] = useState('');
-  const [initError, setInitError] = useState('');
+  const { items, total, clear } = useCart();
+  const [clientSecret, setClientSecret] = useState(null);
+  const [error, setError] = useState("");
+  const navigate = useNavigate();
 
-  // Fetch clientSecret before mounting <Elements>
   useEffect(() => {
-    const init = async () => {
+    let cancelled = false;
+    async function init() {
+      setError("");
+      if (!items.length) return;
+      if (!pk) { setError("Stripe publishable key missing."); return; }
       try {
-  await api.post('/orders', { items, paymentId: paymentIntent?.id || 'test_payment' });
-  clear();
-  navigate('/');
-} catch (e) {
-  console.error('Save order failed:', e?.response?.data || e?.message || e);
-  const msg = e?.response?.data?.message || 'Payment succeeded, but saving the order failed.';
-  setStatus(msg);
-}
-
-    };
+        const { data } = await api.post("/create-payment-intent", { items });
+        if (!cancelled) setClientSecret(data?.clientSecret || null);
+      } catch (e) {
+        if (!cancelled) {
+          const status = e?.response?.status;
+          if (status === 401) {
+            setError("You must be logged in to checkout.");
+          } else {
+            setError(e?.response?.data?.message || "Failed to start payment.");
+          }
+        }
+      }
+    }
     init();
+    return () => { cancelled = true; };
   }, [items]);
-
-  const options = useMemo(() => (
-    clientSecret ? { clientSecret, appearance: { theme: 'stripe' } } : undefined
-  ), [clientSecret]);
 
   if (!items.length) {
     return (
-      <div className="max-w-3xl mx-auto p-6">
-        <h1 className="text-2xl font-bold mb-4">Checkout</h1>
+      <div className="max-w-2xl mx-auto my-8">
+        <h1 className="text-2xl font-semibold mb-4">Checkout</h1>
         <p>Your cart is empty.</p>
-        <Link to="/" className="underline mt-4 inline-block">Back to shop</Link>
       </div>
     );
   }
 
-  if (initError) {
-    return <div className="max-w-3xl mx-auto p-6 text-red-600">{initError}</div>;
-  }
+  return (
+    <div className="max-w-2xl mx-auto my-8">
+      <h1 className="text-2xl font-semibold mb-2">Checkout</h1>
+      <div className="text-gray-700 mb-4">Total: <span className="font-semibold">${total().toFixed(2)}</span></div>
+      {error && <div className="rounded bg-red-50 text-red-700 p-3 mb-3">{error}</div>}
 
-  if (!clientSecret) {
-    return <div className="max-w-3xl mx-auto p-6 text-gray-500">Preparing payment…</div>;
+      {!pk ? (
+        <div className="rounded border bg-yellow-50 text-yellow-800 p-3">Missing VITE_STRIPE_PK</div>
+      ) : !clientSecret ? (
+        <div className="rounded border bg-gray-50 text-gray-700 p-3">Preparing payment…</div>
+      ) : (
+        <Elements stripe={stripePromise} options={{ clientSecret }}>
+          <InnerCheckout
+            onPaid={async (paymentId) => {
+              try { await api.post("/orders", { items, paymentId }); } catch {}
+              clear();
+              navigate("/", { replace: true });
+            }}
+            total={total()}
+          />
+        </Elements>
+      )}
+    </div>
+  );
+}
+
+function InnerCheckout({ onPaid, total }) {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [submitting, setSubmitting] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setMsg("");
+    if (!stripe || !elements) {
+      setMsg("Payment UI still loading…");
+      return;
+    }
+    setSubmitting(true);
+
+    const { error, paymentIntent } = await stripe.confirmPayment({
+      elements,
+      confirmParams: {}, // no redirect
+      redirect: "if_required",
+    });
+
+    setSubmitting(false);
+
+    if (error) {
+      setMsg(error.message || "Payment failed.");
+      return;
+    }
+    if (paymentIntent?.status === "succeeded") {
+      onPaid(paymentIntent.id);
+    } else {
+      setMsg("Payment not completed. Please try again.");
+    }
   }
 
   return (
-    <Elements stripe={stripePromise} options={options}>
-      <CheckoutForm clientSecret={clientSecret} />
-    </Elements>
+    <form onSubmit={handleSubmit} className="grid gap-3">
+      <PaymentElement />
+      {msg && <div className="rounded bg-red-50 text-red-700 p-2 text-sm">{msg}</div>}
+      <button
+        type="submit"
+        disabled={!stripe || submitting}
+        className="inline-flex items-center justify-center rounded-md bg-gray-800 px-4 py-2 text-white hover:bg-gray-900 disabled:opacity-50 disabled:cursor-not-allowed transition"
+      >
+        {submitting ? "Processing…" : `Pay $${total.toFixed(2)}`}
+      </button>
+      {!stripe && (
+        <div className="text-xs text-gray-500">Loading payment UI…</div>
+      )}
+    </form>
   );
 }
